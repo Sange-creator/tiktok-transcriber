@@ -45,3 +45,4 @@ temp/
 *.cookies
 .cookies/
 cookies/
+.vercel

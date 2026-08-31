@@ -38,6 +38,8 @@ interface TranscriptionCardProps {
   onUpdateText?: (id: string, newText: string) => void;
   searchQuery?: string;
   apiKey?: string;
+  isSelected?: boolean;
+  onToggleSelect?: (id: string) => void;
 }
 
 export function TranscriptionCard({
@@ -47,6 +49,8 @@ export function TranscriptionCard({
   onUpdateText,
   searchQuery = "",
   apiKey,
+  isSelected = false,
+  onToggleSelect,
 }: TranscriptionCardProps) {
   const [viewFormat, setViewFormat] = useState<"plain" | "timestamps" | "markdown">("plain");
   const [copiedState, setCopiedState] = useState(false);
@@ -167,10 +171,32 @@ export function TranscriptionCard({
   };
 
   return (
-    <div className="glass-panel rounded-2xl border border-white/10 overflow-hidden shadow-2xl glass-panel-hover transition-all">
+    <div
+      className={`glass-panel rounded-2xl overflow-hidden shadow-2xl transition-all ${
+        isSelected
+          ? "border-2 border-tiktok-cyan ring-4 ring-tiktok-cyan/15 bg-tiktok-cyan/[0.02]"
+          : "border border-white/10 glass-panel-hover"
+      }`}
+    >
       {/* Video Header Card */}
       <div className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 bg-white/[0.02]">
-        <div className="flex items-start gap-3.5 min-w-0">
+        <div className="flex items-start gap-3 min-w-0">
+          {/* Checkbox for Multi-Selection */}
+          {onToggleSelect && (
+            <button
+              type="button"
+              onClick={() => onToggleSelect(item.id)}
+              className={`mt-2 w-5 h-5 rounded-md border flex items-center justify-center transition shrink-0 ${
+                isSelected
+                  ? "bg-tiktok-cyan border-tiktok-cyan text-black shadow-md shadow-tiktok-cyan/30"
+                  : "border-white/20 bg-black/40 hover:border-tiktok-cyan/50 text-transparent"
+              }`}
+              title={isSelected ? "Deselect video" : "Select video"}
+            >
+              <Check className="w-3.5 h-3.5 stroke-[3]" />
+            </button>
+          )}
+
           {/* Thumbnail Preview */}
           <div className="relative w-14 h-18 sm:w-16 sm:h-20 shrink-0 rounded-xl overflow-hidden bg-zinc-900 border border-white/10 flex items-center justify-center">
             {item.metadata?.coverUrl ? (

@@ -4,14 +4,12 @@ import React, { useState, useEffect } from "react";
 import confetti from "canvas-confetti";
 import {
   Mic,
-  Sparkles,
   Zap,
-  CheckCircle2,
-  Copy,
+  Sparkles,
   Layers,
-  HelpCircle,
-  ShieldCheck,
   Flame,
+  ShieldCheck,
+  Copy,
 } from "lucide-react";
 import { TranscriptionResult, TranscriberSettings } from "@/lib/types";
 import { Header } from "@/components/Header";
@@ -36,6 +34,7 @@ export default function HomePage() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [settings, setSettings] = useState<TranscriberSettings>(DEFAULT_SETTINGS);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   // Load settings and cached items from localStorage
   useEffect(() => {
@@ -112,7 +111,7 @@ export default function HomePage() {
     }
   };
 
-  // Parallel Batch Processing with Concurrency Control
+  // Parallel Batch Processing with Concurrency Control & Staggering
   const handleStartTranscription = async (urls: string[]) => {
     if (urls.length === 0 || isProcessing) return;
 
@@ -131,7 +130,7 @@ export default function HomePage() {
     saveItemsToStorage(currentList);
 
     // Dynamic concurrency limit (supports up to 100 parallel workers)
-    const concurrency = Math.max(1, Math.min(settings.concurrency || 100, 100));
+    const concurrency = Math.max(1, Math.min(settings.concurrency || 10, 100));
     const queue = [...newItems];
     const resultsMap = new Map<string, TranscriptionResult>();
 
@@ -192,7 +191,7 @@ export default function HomePage() {
 
   const handleRetry = async (url: string) => {
     const itemToRetry = items.find((i) => i.url === url);
-    if (!itemToRetry) return;
+    if (!itemToRetry || isProcessing) return;
 
     let updated = items.map((i) =>
       i.id === itemToRetry.id ? { ...i, status: "extracting" as const, error: undefined } : i
@@ -213,13 +212,55 @@ export default function HomePage() {
     saveItemsToStorage(updated);
   };
 
+  // Selection handlers
+  const handleToggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleSelectAll = () => {
+    if (selectedIds.size === items.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(items.map((i) => i.id)));
+    }
+  };
+
+  const handleDeselectAll = () => {
+    setSelectedIds(new Set());
+  };
+
+  // Delete handlers
   const handleDeleteItem = (id: string) => {
     const updated = items.filter((i) => i.id !== id);
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
     saveItemsToStorage(updated);
   };
 
+  const handleDeleteSelected = () => {
+    if (selectedIds.size === 0) return;
+    const count = selectedIds.size;
+    if (window.confirm(`Are you sure you want to delete ${count} selected transcription${count > 1 ? "s" : ""}?`)) {
+      const updated = items.filter((i) => !selectedIds.has(i.id));
+      setSelectedIds(new Set());
+      saveItemsToStorage(updated);
+    }
+  };
+
   const handleClearAll = () => {
-    if (window.confirm("Are you sure you want to clear all transcriptions?")) {
+    if (window.confirm("Are you sure you want to clear all transcription history?")) {
+      setSelectedIds(new Set());
       saveItemsToStorage([]);
     }
   };
@@ -271,6 +312,10 @@ export default function HomePage() {
           <section>
             <BatchActionsBar
               items={items}
+              selectedIds={selectedIds}
+              onToggleSelectAll={handleToggleSelectAll}
+              onDeleteSelected={handleDeleteSelected}
+              onDeselectAll={handleDeselectAll}
               onClearAll={handleClearAll}
               searchQuery={searchQuery}
               onSearchChange={setSearchQuery}
@@ -285,6 +330,11 @@ export default function HomePage() {
               <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-400 flex items-center gap-2">
                 <Layers className="w-4 h-4 text-tiktok-cyan" />
                 Transcriptions ({filteredItems.length})
+                {selectedIds.size > 0 && (
+                  <span className="text-xs font-mono text-tiktok-cyan font-bold bg-tiktok-cyan/10 px-2 py-0.5 rounded-full border border-tiktok-cyan/30">
+                    {selectedIds.size} Selected
+                  </span>
+                )}
               </h2>
             </div>
 
@@ -298,6 +348,8 @@ export default function HomePage() {
                   onUpdateText={handleUpdateText}
                   searchQuery={searchQuery}
                   apiKey={settings.geminiApiKey}
+                  isSelected={selectedIds.has(item.id)}
+                  onToggleSelect={handleToggleSelect}
                 />
               ))}
             </div>
@@ -339,7 +391,7 @@ export default function HomePage() {
                   <ShieldCheck className="w-3.5 h-3.5" /> 100% Configured
                 </div>
                 <p className="text-[11px] text-zinc-400">
-                  Pre-configured with your Gemini AI engine ready to use out-of-the-box.
+                  Pre-configured with your AI speech engine ready to use out-of-the-box.
                 </p>
               </div>
             </div>
