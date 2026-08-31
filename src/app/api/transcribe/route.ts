@@ -28,9 +28,9 @@ export async function POST(req: NextRequest) {
 
     const startTime = Date.now();
 
-    // Step 1: Download & Extract Audio
+    // Step 1: Download & Extract Audio (supports optional TikTok login cookies)
     const { metadata, audioFilePath, audioFilename, duration } =
-      await downloadTikTokAudio(cleanUrl);
+      await downloadTikTokAudio(cleanUrl, settings?.tiktokCookies);
 
     // Step 2: Transcribe the Audio
     const transcription = await transcribeAudio({

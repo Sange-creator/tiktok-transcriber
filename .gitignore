@@ -38,3 +38,10 @@ Thumbs.db
 # Temp audio downloads
 tmp/
 temp/
+
+# Cookie files (NEVER commit TikTok credentials)
+*cookies.txt
+*.cookie
+*.cookies
+.cookies/
+cookies/

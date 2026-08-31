@@ -47,6 +47,7 @@ export interface TranscriberSettings {
   includeTimestamps: boolean;
   temperature?: number;
   concurrency?: number; // Parallel batch worker count (default 4)
+  tiktokCookies?: string; // Optional Netscape / Cookie string for logged-in / private downloads
 }
 
 export type ExportFormat = "text" | "srt" | "vtt" | "markdown" | "json";

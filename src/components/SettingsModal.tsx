@@ -15,6 +15,7 @@ import {
   Cpu,
   Eye,
   EyeOff,
+  Cookie,
 } from "lucide-react";
 import { TranscriberSettings, TranscriptionProvider } from "@/lib/types";
 
@@ -55,6 +56,7 @@ export function SettingsModal({
   const [showGroqKey, setShowGroqKey] = useState(false);
   const [showOpenAIKey, setShowOpenAIKey] = useState(false);
   const [showGeminiKey, setShowGeminiKey] = useState(false);
+  const [showCookies, setShowCookies] = useState(false);
 
   useEffect(() => {
     setLocalSettings(settings);
@@ -127,7 +129,7 @@ export function SettingsModal({
                 Transcription Settings
               </h2>
               <p className="text-xs text-zinc-400">
-                Configure AI speech engines & parallel concurrency
+                Configure AI speech engines, cookies & parallel concurrency
               </p>
             </div>
           </div>
@@ -353,6 +355,46 @@ export function SettingsModal({
             </div>
           </div>
 
+          {/* TikTok Login Cookies (Optional) */}
+          <div className="space-y-2 p-3.5 rounded-xl bg-zinc-900/60 border border-white/10">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold uppercase tracking-wider text-zinc-200 flex items-center gap-1.5">
+                <Cookie className="w-3.5 h-3.5 text-amber-400" />
+                TikTok Login Cookies (Optional)
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowCookies(!showCookies)}
+                className="text-xs text-tiktok-cyan hover:underline flex items-center gap-1"
+              >
+                {showCookies ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                {showCookies ? "Hide" : "Show/Paste"}
+              </button>
+            </div>
+            {showCookies ? (
+              <div className="space-y-2 pt-1 animate-in fade-in duration-200">
+                <textarea
+                  rows={3}
+                  placeholder="Paste cookies.txt (Netscape format) or sessionid=...; ttwid=..."
+                  value={localSettings.tiktokCookies || ""}
+                  onChange={(e) =>
+                    setLocalSettings({ ...localSettings, tiktokCookies: e.target.value })
+                  }
+                  className="w-full px-3 py-2 rounded-lg bg-black/50 border border-white/10 text-xs font-mono text-white focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 placeholder:text-zinc-600 resize-none"
+                />
+                <p className="text-[11px] text-zinc-400 leading-relaxed">
+                  Allows downloading private, friends-only, or age-restricted TikTok videos. Saved strictly in your local browser storage.
+                </p>
+              </div>
+            ) : (
+              <p className="text-[11px] text-zinc-400">
+                {localSettings.tiktokCookies
+                  ? "✓ TikTok cookies are configured."
+                  : "Not configured. Standard public videos download automatically without cookies."}
+              </p>
+            )}
+          </div>
+
           {/* Parallel Batch Workers (Concurrency - Up to 100) */}
           <div className="space-y-2.5 p-3.5 rounded-xl bg-zinc-900/60 border border-white/10">
             <div className="flex items-center justify-between">
@@ -412,7 +454,7 @@ export function SettingsModal({
           <div className="flex items-start gap-2.5 p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-300 text-xs">
             <Shield className="w-4 h-4 shrink-0 mt-0.5" />
             <span>
-              Your API keys are stored locally in your browser and are never transmitted to any third-party servers.
+              Your API keys and cookies are stored locally in your browser and are never transmitted to any third-party servers.
             </span>
           </div>
         </div>
