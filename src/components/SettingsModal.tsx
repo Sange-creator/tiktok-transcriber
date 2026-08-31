@@ -10,14 +10,21 @@ import {
   ExternalLink,
   Check,
   Sparkles,
-  AlertCircle,
   CheckCircle2,
   Cpu,
   Eye,
   EyeOff,
   Cookie,
+  Plus,
+  Trash2,
+  Users,
+  RefreshCw,
 } from "lucide-react";
-import { TranscriberSettings, TranscriptionProvider } from "@/lib/types";
+import {
+  TranscriberSettings,
+  TranscriptionProvider,
+  TikTokAccountSession,
+} from "@/lib/types";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -56,7 +63,12 @@ export function SettingsModal({
   const [showGroqKey, setShowGroqKey] = useState(false);
   const [showOpenAIKey, setShowOpenAIKey] = useState(false);
   const [showGeminiKey, setShowGeminiKey] = useState(false);
-  const [showCookies, setShowCookies] = useState(false);
+
+  // Multi-session pool state
+  const [newSessionName, setNewSessionName] = useState("");
+  const [newSessionId, setNewSessionId] = useState("");
+  const [showSessionInput, setShowSessionInput] = useState(false);
+  const [revealedSessionIds, setRevealedSessionIds] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     setLocalSettings(settings);
@@ -97,6 +109,45 @@ export function SettingsModal({
     setLocalSettings({ ...localSettings, geminiApiKey: trimmed });
   };
 
+  const handleAddSession = () => {
+    if (!newSessionId.trim()) return;
+    const sessions = localSettings.tiktokSessions || [];
+    const count = sessions.length + 1;
+    const newSession: TikTokAccountSession = {
+      id: `${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      name: newSessionName.trim() || `Account ${count}`,
+      sessionId: newSessionId.trim(),
+      active: true,
+      createdAt: Date.now(),
+    };
+
+    setLocalSettings({
+      ...localSettings,
+      tiktokSessions: [...sessions, newSession],
+    });
+    setNewSessionName("");
+    setNewSessionId("");
+  };
+
+  const handleToggleSession = (id: string) => {
+    const sessions = (localSettings.tiktokSessions || []).map((s) =>
+      s.id === id ? { ...s, active: !s.active } : s
+    );
+    setLocalSettings({ ...localSettings, tiktokSessions: sessions });
+  };
+
+  const handleDeleteSession = (id: string) => {
+    const sessions = (localSettings.tiktokSessions || []).filter((s) => s.id !== id);
+    setLocalSettings({ ...localSettings, tiktokSessions: sessions });
+  };
+
+  const toggleRevealSession = (id: string) => {
+    setRevealedSessionIds((prev) => ({
+      ...prev,
+      [id]: !prev[id],
+    }));
+  };
+
   const handleSave = () => {
     onSaveSettings(localSettings);
     setSavedSuccess(true);
@@ -111,6 +162,9 @@ export function SettingsModal({
   const isGeminiValid =
     localSettings.geminiApiKey?.startsWith("AIzaSy") ||
     localSettings.geminiApiKey?.startsWith("AQ.");
+
+  const sessions = localSettings.tiktokSessions || [];
+  const activeSessionsCount = sessions.filter((s) => s.active).length;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md transition-opacity">
@@ -129,7 +183,7 @@ export function SettingsModal({
                 Transcription Settings
               </h2>
               <p className="text-xs text-zinc-400">
-                Configure AI speech engines, cookies & parallel concurrency
+                Configure AI engines, multi-account sessions & concurrency
               </p>
             </div>
           </div>
@@ -355,43 +409,122 @@ export function SettingsModal({
             </div>
           </div>
 
-          {/* TikTok Login Cookies (Optional) */}
-          <div className="space-y-2 p-3.5 rounded-xl bg-zinc-900/60 border border-white/10">
+          {/* TikTok Multi-Account Session Manager */}
+          <div className="space-y-3 p-3.5 rounded-xl bg-zinc-900/70 border border-white/10">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold uppercase tracking-wider text-zinc-200 flex items-center gap-1.5">
-                <Cookie className="w-3.5 h-3.5 text-amber-400" />
-                TikTok Login Cookies (Optional)
-              </label>
+              <div className="flex items-center gap-1.5">
+                <Users className="w-3.5 h-3.5 text-amber-400" />
+                <label className="text-xs font-semibold uppercase tracking-wider text-zinc-200">
+                  TikTok Multi-Account Sessions
+                </label>
+                {activeSessionsCount > 0 && (
+                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-400/15 text-amber-300 font-bold">
+                    {activeSessionsCount} active
+                  </span>
+                )}
+              </div>
               <button
                 type="button"
-                onClick={() => setShowCookies(!showCookies)}
-                className="text-xs text-tiktok-cyan hover:underline flex items-center gap-1"
+                onClick={() => setShowSessionInput(!showSessionInput)}
+                className="text-xs text-tiktok-cyan hover:underline flex items-center gap-1 font-medium"
               >
-                {showCookies ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                {showCookies ? "Hide" : "Show/Paste"}
+                {showSessionInput ? "Done" : "+ Add Session"}
               </button>
             </div>
-            {showCookies ? (
-              <div className="space-y-2 pt-1 animate-in fade-in duration-200">
-                <textarea
-                  rows={3}
-                  placeholder="Paste cookies.txt (Netscape format) or sessionid=...; ttwid=..."
-                  value={localSettings.tiktokCookies || ""}
-                  onChange={(e) =>
-                    setLocalSettings({ ...localSettings, tiktokCookies: e.target.value })
-                  }
-                  className="w-full px-3 py-2 rounded-lg bg-black/50 border border-white/10 text-xs font-mono text-white focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 placeholder:text-zinc-600 resize-none"
-                />
-                <p className="text-[11px] text-zinc-400 leading-relaxed">
-                  Allows downloading private, friends-only, or age-restricted TikTok videos. Saved strictly in your local browser storage.
-                </p>
+
+            {/* Configured Sessions List */}
+            {sessions.length > 0 ? (
+              <div className="space-y-2 max-h-36 overflow-y-auto pr-1">
+                {sessions.map((sess) => {
+                  const isRevealed = revealedSessionIds[sess.id];
+                  return (
+                    <div
+                      key={sess.id}
+                      className={`flex items-center justify-between p-2.5 rounded-lg border text-xs transition ${
+                        sess.active
+                          ? "bg-black/50 border-amber-400/30"
+                          : "bg-white/[0.02] border-white/5 opacity-50"
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1 pr-2">
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleSession(sess.id)}
+                            className={`w-3.5 h-3.5 rounded border flex items-center justify-center transition ${
+                              sess.active
+                                ? "bg-amber-400 border-amber-400 text-black"
+                                : "border-white/20 hover:border-white/40"
+                            }`}
+                            title={sess.active ? "Enabled" : "Disabled"}
+                          >
+                            {sess.active && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                          </button>
+                          <span className="font-semibold text-zinc-200 truncate">
+                            {sess.name}
+                          </span>
+                        </div>
+                        <p className="text-[10px] font-mono text-zinc-500 mt-0.5 truncate pl-5">
+                          {isRevealed
+                            ? sess.sessionId
+                            : `sessionid=••••••••${sess.sessionId.slice(-6)}`}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => toggleRevealSession(sess.id)}
+                          className="p-1 text-zinc-400 hover:text-white transition"
+                          title={isRevealed ? "Hide" : "Show"}
+                        >
+                          {isRevealed ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteSession(sess.id)}
+                          className="p-1 text-zinc-500 hover:text-red-400 transition"
+                          title="Delete session"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             ) : (
-              <p className="text-[11px] text-zinc-400">
-                {localSettings.tiktokCookies
-                  ? "✓ TikTok cookies are configured."
-                  : "Not configured. Standard public videos download automatically without cookies."}
+              <p className="text-[11px] text-zinc-400 leading-relaxed">
+                Add multiple TikTok session IDs to automatically rotate accounts across batch transcriptions.
               </p>
+            )}
+
+            {/* Add Session Input Form */}
+            {showSessionInput && (
+              <div className="p-3 rounded-lg bg-black/60 border border-white/10 space-y-2 animate-in fade-in duration-150">
+                <input
+                  type="text"
+                  placeholder="Account Label (e.g. Account 1, Main, Backup)"
+                  value={newSessionName}
+                  onChange={(e) => setNewSessionName(e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-white/10 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-amber-400"
+                />
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    placeholder="Paste sessionid=... or full cookie string"
+                    value={newSessionId}
+                    onChange={(e) => setNewSessionId(e.target.value)}
+                    className="flex-1 px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-white/10 text-xs font-mono text-white placeholder:text-zinc-600 focus:outline-none focus:border-amber-400"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddSession}
+                    className="px-3 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-black font-bold text-xs flex items-center gap-1 shrink-0 transition"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Add
+                  </button>
+                </div>
+              </div>
             )}
           </div>
 
@@ -454,7 +587,7 @@ export function SettingsModal({
           <div className="flex items-start gap-2.5 p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-300 text-xs">
             <Shield className="w-4 h-4 shrink-0 mt-0.5" />
             <span>
-              Your API keys and cookies are stored locally in your browser and are never transmitted to any third-party servers.
+              Your API keys and session cookies are stored locally in your browser and are never transmitted to any third-party servers.
             </span>
           </div>
         </div>

@@ -38,6 +38,14 @@ export interface TranscriptionResult {
 
 export type TranscriptionProvider = "groq" | "openai" | "gemini" | "auto";
 
+export interface TikTokAccountSession {
+  id: string;
+  name: string;
+  sessionId: string; // sessionid or full cookie string
+  active: boolean;
+  createdAt?: number;
+}
+
 export interface TranscriberSettings {
   provider: TranscriptionProvider;
   groqApiKey?: string;
@@ -47,7 +55,9 @@ export interface TranscriberSettings {
   includeTimestamps: boolean;
   temperature?: number;
   concurrency?: number; // Parallel batch worker count (default 4)
-  tiktokCookies?: string; // Optional Netscape / Cookie string for logged-in / private downloads
+  tiktokCookies?: string; // Legacy/direct single cookie string
+  tiktokSessions?: TikTokAccountSession[]; // Multi-account session pool
+  rotateSessions?: boolean; // Enable round-robin session rotation
 }
 
 export type ExportFormat = "text" | "srt" | "vtt" | "markdown" | "json";

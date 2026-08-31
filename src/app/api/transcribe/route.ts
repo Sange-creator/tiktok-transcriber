@@ -28,9 +28,23 @@ export async function POST(req: NextRequest) {
 
     const startTime = Date.now();
 
-    // Step 1: Download & Extract Audio (supports optional TikTok login cookies)
+    // Resolve active cookie/sessionId from multi-account pool or direct cookie
+    let activeCookie = settings?.tiktokCookies;
+    if (settings?.tiktokSessions && Array.isArray(settings.tiktokSessions)) {
+      const activeSessions = settings.tiktokSessions.filter(
+        (s: any) => s.active && s.sessionId?.trim()
+      );
+      if (activeSessions.length > 0) {
+        // Random/Round-robin distribution across active accounts
+        const selected =
+          activeSessions[Math.floor(Math.random() * activeSessions.length)];
+        activeCookie = selected.sessionId.trim();
+      }
+    }
+
+    // Step 1: Download & Extract Audio (supports optional TikTok login session pool)
     const { metadata, audioFilePath, audioFilename, duration } =
-      await downloadTikTokAudio(cleanUrl, settings?.tiktokCookies);
+      await downloadTikTokAudio(cleanUrl, activeCookie);
 
     // Step 2: Transcribe the Audio
     const transcription = await transcribeAudio({
