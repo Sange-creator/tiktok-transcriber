@@ -1,0 +1,28 @@
+<svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="100" height="100" rx="28" fill="#0B0E14"/>
+  <rect x="1" y="1" width="98" height="98" rx="27" stroke="rgba(255, 255, 255, 0.15)" stroke-width="2"/>
+  
+  <!-- Cyan Offset -->
+  <g transform="translate(-2.5, -2)">
+    <path d="M48 24V62C48 68.627 42.627 74 36 74C29.373 74 24 68.627 24 62C24 55.373 29.373 50 36 50C38.2 50 40.2 50.6 42 51.6V24C42 24 53 19 68 24V36C58 32 48 24 48 24Z" fill="#25F4EE" opacity="0.9"/>
+    <rect x="74" y="38" width="5" height="24" rx="2.5" fill="#25F4EE" opacity="0.85" />
+    <rect x="83" y="44" width="5" height="12" rx="2.5" fill="#25F4EE" opacity="0.75" />
+  </g>
+
+  <!-- Pink Offset -->
+  <g transform="translate(2.5, 2)">
+    <path d="M48 24V62C48 68.627 42.627 74 36 74C29.373 74 24 68.627 24 62C24 55.373 29.373 50 36 50C38.2 50 40.2 50.6 42 51.6V24C42 24 53 19 68 24V36C58 32 48 24 48 24Z" fill="#FE2C55" opacity="0.9"/>
+    <rect x="74" y="38" width="5" height="24" rx="2.5" fill="#FE2C55" opacity="0.85" />
+    <rect x="83" y="44" width="5" height="12" rx="2.5" fill="#FE2C55" opacity="0.75" />
+  </g>
+
+  <!-- Core White / Soundwaves -->
+  <g transform="translate(0, 0)">
+    <path d="M48 24V62C48 68.627 42.627 74 36 74C29.373 74 24 68.627 24 62C24 55.373 29.373 50 36 50C38.2 50 40.2 50.6 42 51.6V24C42 24 53 19 68 24V36C58 32 48 24 48 24Z" fill="#FFFFFF"/>
+    <rect x="65" y="32" width="5.5" height="36" rx="2.75" fill="#FFFFFF"/>
+    <rect x="74" y="38" width="5.5" height="24" rx="2.75" fill="#FFFFFF"/>
+    <rect x="83" y="44" width="5.5" height="12" rx="2.75" fill="#FFFFFF"/>
+    <circle cx="36" cy="62" r="4.5" fill="#0B0E14"/>
+    <circle cx="36" cy="62" r="2.5" fill="#25F4EE"/>
+  </g>
+</svg>

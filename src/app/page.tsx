@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { TranscriptionResult, TranscriberSettings } from "@/lib/types";
 import { Header } from "@/components/Header";
+import { Logo } from "@/components/Logo";
 import { UrlInputSection } from "@/components/UrlInputSection";
 import { TranscriptionCard } from "@/components/TranscriptionCard";
 import { BatchActionsBar } from "@/components/BatchActionsBar";
@@ -529,8 +530,8 @@ export default function HomePage() {
         ) : (
           /* Empty State Guide */
           <section className="glass-panel rounded-2xl p-8 text-center space-y-4 border border-dashed border-white/10">
-            <div className="w-12 h-12 rounded-2xl bg-zinc-900 border border-white/10 flex items-center justify-center mx-auto text-tiktok-pink">
-              <Mic className="w-6 h-6" />
+            <div className="flex justify-center mx-auto">
+              <Logo size="lg" animated={true} />
             </div>
             <div className="space-y-1">
               <h3 className="text-base font-semibold text-white">
