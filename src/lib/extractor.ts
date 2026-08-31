@@ -38,7 +38,6 @@ export function normalizeTikTokUrl(rawUrl: string): string {
   let clean = rawUrl.trim();
   try {
     const parsed = new URL(clean);
-    // Keep host and pathname, drop all UTM / tracking query params
     return `${parsed.protocol}//${parsed.host}${parsed.pathname}`;
   } catch {
     return clean;
@@ -158,7 +157,7 @@ export async function downloadTikTokAudio(url: string): Promise<ExtractedAudioRe
   const audioFilePath = path.join(audioDir, audioFilename);
   const ffmpegPath = findFfmpegPath();
 
-  // Strategy 1: Fast TikWM Direct API with Audio-first Extraction
+  // Strategy 1: High-Speed TikWM API with verified candidate stream downloads
   try {
     const params = new URLSearchParams();
     params.append("url", cleanUrl);
@@ -173,7 +172,7 @@ export async function downloadTikTokAudio(url: string): Promise<ExtractedAudioRe
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
       },
       body: params.toString(),
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(12000),
     });
 
     if (response.ok) {
@@ -197,28 +196,40 @@ export async function downloadTikTokAudio(url: string): Promise<ExtractedAudioRe
           likeCount: item.digg_count,
         };
 
-        // 1. First priority: Direct audio music stream (only ~300KB, downloads in <0.2s!)
-        const musicUrl = item.music || item.music_info?.play;
-        if (musicUrl) {
-          const resolvedMusicUrl = musicUrl.startsWith("/")
-            ? `https://www.tikwm.com${musicUrl}`
-            : musicUrl;
+        // Build list of candidate stream URLs in priority order:
+        const candidates: string[] = [
+          item.music_info?.play, // 1. Direct TikTok CDN audio stream (ultra-fast, no 403s)
+          item.play?.startsWith("http") ? item.play : item.play ? `https://www.tikwm.com${item.play}` : null,
+          item.wmplay?.startsWith("http") ? item.wmplay : item.wmplay ? `https://www.tikwm.com${item.wmplay}` : null,
+          item.hdplay?.startsWith("http") ? item.hdplay : item.hdplay ? `https://www.tikwm.com${item.hdplay}` : null,
+          item.music?.startsWith("http") ? item.music : null,
+        ].filter((c): c is string => Boolean(c));
 
+        for (const streamUrl of candidates) {
           try {
-            const mRes = await fetch(resolvedMusicUrl, {
-              headers: { "User-Agent": "Mozilla/5.0", Referer: "https://www.tiktok.com/" },
-              signal: AbortSignal.timeout(10000),
+            const streamRes = await fetch(streamUrl, {
+              headers: {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                Referer: "https://www.tikwm.com/",
+              },
+              signal: AbortSignal.timeout(15000),
             });
 
-            if (mRes.ok) {
-              const arrayBuffer = await mRes.arrayBuffer();
+            const contentType = streamRes.headers.get("content-type") || "";
+            // Reject HTML error pages (e.g. 403 forbidden)
+            if (
+              streamRes.ok &&
+              !contentType.includes("text/html") &&
+              (contentType.includes("audio") || contentType.includes("video") || contentType.includes("octet-stream"))
+            ) {
+              const arrayBuffer = await streamRes.arrayBuffer();
               const buffer = Buffer.from(arrayBuffer);
 
               if (buffer.length > 5000) {
-                const tempRaw = path.join(audioDir, `${fileId}_mraw`);
+                const tempRaw = path.join(audioDir, `${fileId}_raw`);
                 fs.writeFileSync(tempRaw, buffer);
 
-                // Convert to ultra-compact 16kHz mono speech MP3
+                // Convert to clean 16kHz mono MP3
                 try {
                   await execAsync(
                     `"${ffmpegPath}" -y -i "${tempRaw}" -vn -ar 16000 -ac 1 -b:a 32k -preset ultrafast "${audioFilePath}"`,
@@ -227,7 +238,11 @@ export async function downloadTikTokAudio(url: string): Promise<ExtractedAudioRe
                 } catch {
                   fs.copyFileSync(tempRaw, audioFilePath);
                 } finally {
-                  if (fs.existsSync(tempRaw)) fs.unlinkSync(tempRaw);
+                  if (fs.existsSync(tempRaw)) {
+                    try {
+                      fs.unlinkSync(tempRaw);
+                    } catch {}
+                  }
                 }
 
                 if (fs.existsSync(audioFilePath) && fs.statSync(audioFilePath).size > 1000) {
@@ -240,41 +255,14 @@ export async function downloadTikTokAudio(url: string): Promise<ExtractedAudioRe
                 }
               }
             }
-          } catch (mErr) {
-            console.warn("Direct music fetch failed, falling back to video stream:", mErr);
-          }
-        }
-
-        // 2. Second priority: Stream from video URL directly via FFmpeg
-        const videoUrl = item.play || item.wmplay;
-        if (videoUrl) {
-          const resolvedVideoUrl = videoUrl.startsWith("/")
-            ? `https://www.tikwm.com${videoUrl}`
-            : videoUrl;
-
-          try {
-            // Direct streaming extraction: FFmpeg connects to HTTP stream and extracts audio without full video download
-            await execAsync(
-              `"${ffmpegPath}" -y -headers "User-Agent: Mozilla/5.0\r\nReferer: https://www.tiktok.com/\r\n" -i "${resolvedVideoUrl}" -vn -ar 16000 -ac 1 -b:a 32k -preset ultrafast "${audioFilePath}"`,
-              { timeout: 20000, env: { ...process.env, PATH: `/opt/homebrew/bin:${process.env.PATH}` } }
-            );
-
-            if (fs.existsSync(audioFilePath) && fs.statSync(audioFilePath).size > 1000) {
-              return {
-                metadata,
-                audioFilePath,
-                audioFilename,
-                duration: metadata.duration,
-              };
-            }
-          } catch (streamErr) {
-            console.warn("FFmpeg stream extraction failed, trying buffered download:", streamErr);
+          } catch (candidateErr) {
+            console.warn("Candidate stream download failed, trying next:", candidateErr);
           }
         }
       }
     }
   } catch (tikwmErr) {
-    console.warn("TikWM extraction failed, falling back to yt-dlp:", tikwmErr);
+    console.warn("TikWM extraction failed, trying yt-dlp fallback:", tikwmErr);
   }
 
   // Strategy 2: yt-dlp Download & Extraction Fallback
