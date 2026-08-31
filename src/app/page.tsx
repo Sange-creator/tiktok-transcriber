@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import confetti from "canvas-confetti";
 import {
   Mic,
@@ -25,16 +25,30 @@ const DEFAULT_SETTINGS: TranscriberSettings = {
   groqApiKey: "",
   openaiApiKey: "",
   geminiApiKey: "",
-  concurrency: 10,
+  concurrency: 100, // Default to 100 Turbo Parallel
 };
 
 export default function HomePage() {
   const [items, setItems] = useState<TranscriptionResult[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [settings, setSettings] = useState<TranscriberSettings>(DEFAULT_SETTINGS);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [queueCount, setQueueCount] = useState(0);
+
+  // Queue state refs for thread-safe worker execution
+  const activeQueueRef = useRef<Array<{ id: string; url: string }>>([]);
+  const isPausedRef = useRef(false);
+  const isCancelledRef = useRef(false);
+  const activeWorkersCountRef = useRef(0);
+  const settingsRef = useRef<TranscriberSettings>(DEFAULT_SETTINGS);
+
+  // Keep settingsRef in sync
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
 
   // Load settings and cached items from localStorage
   useEffect(() => {
@@ -42,11 +56,14 @@ export default function HomePage() {
       const savedSettings = localStorage.getItem("tiktok_transcriber_settings");
       if (savedSettings) {
         const parsed = JSON.parse(savedSettings);
-        setSettings({
+        const merged: TranscriberSettings = {
           ...DEFAULT_SETTINGS,
           ...parsed,
+          concurrency: parsed.concurrency || 100,
           geminiApiKey: parsed.geminiApiKey || DEFAULT_SETTINGS.geminiApiKey,
-        });
+        };
+        setSettings(merged);
+        settingsRef.current = merged;
       }
       const savedItems = localStorage.getItem("tiktok_transcriber_history");
       if (savedItems) {
@@ -57,8 +74,7 @@ export default function HomePage() {
     }
   }, []);
 
-  const saveItemsToStorage = (updatedItems: TranscriptionResult[]) => {
-    setItems(updatedItems);
+  const saveToStorageOnly = (updatedItems: TranscriptionResult[]) => {
     try {
       localStorage.setItem("tiktok_transcriber_history", JSON.stringify(updatedItems));
     } catch (err) {
@@ -66,8 +82,14 @@ export default function HomePage() {
     }
   };
 
+  const saveItemsToStorage = (updatedItems: TranscriptionResult[]) => {
+    setItems(updatedItems);
+    saveToStorageOnly(updatedItems);
+  };
+
   const handleSaveSettings = (newSettings: TranscriberSettings) => {
     setSettings(newSettings);
+    settingsRef.current = newSettings;
     try {
       localStorage.setItem("tiktok_transcriber_settings", JSON.stringify(newSettings));
     } catch (err) {
@@ -86,7 +108,7 @@ export default function HomePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           url,
-          settings,
+          settings: settingsRef.current,
         }),
       });
 
@@ -111,13 +133,97 @@ export default function HomePage() {
     }
   };
 
-  // Parallel Batch Processing with Concurrency Control & Staggering
-  const handleStartTranscription = async (urls: string[]) => {
-    if (urls.length === 0 || isProcessing) return;
+  // Worker loop
+  const spawnWorker = async (workerIndex: number) => {
+    activeWorkersCountRef.current += 1;
+
+    while (activeQueueRef.current.length > 0) {
+      if (isCancelledRef.current) break;
+
+      // Pause loop: wait until unpaused or cancelled
+      while (isPausedRef.current) {
+        await new Promise((r) => setTimeout(r, 200));
+        if (isCancelledRef.current) break;
+      }
+      if (isCancelledRef.current) break;
+
+      const target = activeQueueRef.current.shift();
+      if (!target) break;
+
+      setQueueCount(activeQueueRef.current.length);
+
+      // Mark status as transcribing
+      setItems((prev) => {
+        const next = prev.map((item) =>
+          item.id === target.id ? { ...item, status: "transcribing" as const } : item
+        );
+        saveToStorageOnly(next);
+        return next;
+      });
+
+      let result = await processSingleUrl(target.url, target.id);
+
+      // Auto-retry once on transient network failure
+      if (result.status === "error" && !isCancelledRef.current) {
+        await new Promise((r) => setTimeout(r, 500));
+        result = await processSingleUrl(target.url, target.id);
+      }
+
+      // Update state and persistent storage with final result
+      setItems((prev) => {
+        const next = prev.map((item) =>
+          item.id === target.id ? result : item
+        );
+        saveToStorageOnly(next);
+        return next;
+      });
+    }
+
+    activeWorkersCountRef.current -= 1;
+
+    // When all workers finish and queue is empty
+    if (activeWorkersCountRef.current === 0 && activeQueueRef.current.length === 0) {
+      setIsProcessing(false);
+      setIsPaused(false);
+      isPausedRef.current = false;
+      setQueueCount(0);
+
+      // Trigger celebration confetti
+      confetti({
+        particleCount: 80,
+        spread: 75,
+        origin: { y: 0.6 },
+        colors: ["#FE2C55", "#25F4EE", "#FFFFFF"],
+      });
+    }
+  };
+
+  // Starts or scales worker pool up to settings.concurrency (default 100 Turbo)
+  const startQueueProcessing = () => {
+    if (activeQueueRef.current.length === 0) {
+      setIsProcessing(false);
+      setQueueCount(0);
+      return;
+    }
 
     setIsProcessing(true);
+    isCancelledRef.current = false;
+    setQueueCount(activeQueueRef.current.length);
 
-    // Create initial placeholder items
+    const concurrency = Math.max(1, Math.min(settingsRef.current.concurrency || 100, 100));
+    const targetWorkers = Math.min(concurrency, activeQueueRef.current.length);
+    const workersToLaunch = Math.max(0, targetWorkers - activeWorkersCountRef.current);
+
+    for (let i = 0; i < workersToLaunch; i++) {
+      spawnWorker(activeWorkersCountRef.current + i);
+    }
+  };
+
+  // Add new links (works anytime, even while transcribing!)
+  const handleStartTranscription = (urls: string[]) => {
+    if (urls.length === 0) return;
+
+    // Create placeholder items
     const newItems: TranscriptionResult[] = urls.map((url) => ({
       id: `${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       url,
@@ -125,83 +231,135 @@ export default function HomePage() {
       status: "extracting",
     }));
 
-    // Prepend to current list
-    let currentList = [...newItems, ...items];
-    saveItemsToStorage(currentList);
+    // Prepend to visible list
+    setItems((prev) => {
+      const next = [...newItems, ...prev];
+      saveToStorageOnly(next);
+      return next;
+    });
 
-    // Dynamic concurrency limit (supports up to 100 parallel workers)
-    const concurrency = Math.max(1, Math.min(settings.concurrency || 10, 100));
-    const queue = [...newItems];
-    const resultsMap = new Map<string, TranscriptionResult>();
+    // Add to active processing queue
+    newItems.forEach((item) => {
+      activeQueueRef.current.push({ id: item.id, url: item.url });
+    });
 
-    const runWorker = async (workerIndex: number) => {
-      // Stagger worker start times slightly to prevent instantaneous traffic spikes
-      if (workerIndex > 0) {
-        await new Promise((r) => setTimeout(r, workerIndex * 150));
-      }
+    setQueueCount(activeQueueRef.current.length);
 
-      while (queue.length > 0) {
-        const targetItem = queue.shift();
-        if (!targetItem) break;
-
-        // Set to transcribing
-        currentList = currentList.map((item) =>
-          item.id === targetItem.id ? { ...item, status: "transcribing" } : item
-        );
-        saveItemsToStorage(currentList);
-
-        let result = await processSingleUrl(targetItem.url, targetItem.id);
-
-        // Auto-retry once on transient network failure
-        if (result.status === "error") {
-          await new Promise((r) => setTimeout(r, 600));
-          result = await processSingleUrl(targetItem.url, targetItem.id);
-        }
-
-        resultsMap.set(targetItem.id, result);
-
-        currentList = currentList.map((item) =>
-          item.id === targetItem.id ? result : item
-        );
-        saveItemsToStorage(currentList);
-      }
-    };
-
-    // Run workers concurrently
-    const workers = Array.from(
-      { length: Math.min(concurrency, newItems.length) },
-      (_, idx) => runWorker(idx)
-    );
-
-    await Promise.all(workers);
-
-    setIsProcessing(false);
-
-    // Trigger confetti if at least one succeeded
-    const anySuccess = currentList.some((i) => i.status === "completed");
-    if (anySuccess) {
-      confetti({
-        particleCount: 90,
-        spread: 80,
-        origin: { y: 0.6 },
-        colors: ["#FE2C55", "#25F4EE", "#FFFFFF"],
-      });
+    // If not paused, start/expand workers immediately
+    if (!isPausedRef.current) {
+      startQueueProcessing();
     }
   };
 
-  const handleRetry = async (url: string) => {
+  // Pause queue
+  const handlePause = () => {
+    setIsPaused(true);
+    isPausedRef.current = true;
+  };
+
+  // Resume queue
+  const handleResume = () => {
+    setIsPaused(false);
+    isPausedRef.current = false;
+    startQueueProcessing();
+  };
+
+  // Cancel/Stop queue
+  const handleCancelQueue = () => {
+    isCancelledRef.current = true;
+    const queuedIds = new Set(activeQueueRef.current.map((q) => q.id));
+    activeQueueRef.current = [];
+
+    setItems((prev) => {
+      const next = prev.map((item) =>
+        queuedIds.has(item.id) && (item.status === "extracting" || item.status === "transcribing")
+          ? { ...item, status: "idle" as const }
+          : item
+      );
+      saveToStorageOnly(next);
+      return next;
+    });
+
+    setIsProcessing(false);
+    setIsPaused(false);
+    isPausedRef.current = false;
+    setQueueCount(0);
+  };
+
+  // Retranscribe a single URL/card
+  const handleRetry = (url: string) => {
     const itemToRetry = items.find((i) => i.url === url);
-    if (!itemToRetry || isProcessing) return;
+    if (!itemToRetry) return;
 
-    let updated = items.map((i) =>
-      i.id === itemToRetry.id ? { ...i, status: "extracting" as const, error: undefined } : i
-    );
-    saveItemsToStorage(updated);
+    setItems((prev) => {
+      const next = prev.map((i) =>
+        i.id === itemToRetry.id
+          ? { ...i, status: "extracting" as const, error: undefined, text: "" }
+          : i
+      );
+      saveToStorageOnly(next);
+      return next;
+    });
 
-    const result = await processSingleUrl(url, itemToRetry.id);
+    activeQueueRef.current.push({ id: itemToRetry.id, url: itemToRetry.url });
+    setQueueCount(activeQueueRef.current.length);
 
-    updated = updated.map((i) => (i.id === itemToRetry.id ? result : i));
-    saveItemsToStorage(updated);
+    if (!isPausedRef.current) {
+      startQueueProcessing();
+    }
+  };
+
+  // Retranscribe multiple selected items
+  const handleRetranscribeSelected = () => {
+    if (selectedIds.size === 0) return;
+    const selectedList = items.filter((i) => selectedIds.has(i.id));
+
+    setItems((prev) => {
+      const next = prev.map((i) =>
+        selectedIds.has(i.id)
+          ? { ...i, status: "extracting" as const, error: undefined, text: "" }
+          : i
+      );
+      saveToStorageOnly(next);
+      return next;
+    });
+
+    selectedList.forEach((item) => {
+      activeQueueRef.current.push({ id: item.id, url: item.url });
+    });
+
+    setQueueCount(activeQueueRef.current.length);
+    setSelectedIds(new Set());
+
+    if (!isPausedRef.current) {
+      startQueueProcessing();
+    }
+  };
+
+  // Retranscribe all failed items
+  const handleRetranscribeFailed = () => {
+    const failedItems = items.filter((i) => i.status === "error");
+    if (failedItems.length === 0) return;
+
+    setItems((prev) => {
+      const next = prev.map((i) =>
+        i.status === "error"
+          ? { ...i, status: "extracting" as const, error: undefined, text: "" }
+          : i
+      );
+      saveToStorageOnly(next);
+      return next;
+    });
+
+    failedItems.forEach((item) => {
+      activeQueueRef.current.push({ id: item.id, url: item.url });
+    });
+
+    setQueueCount(activeQueueRef.current.length);
+
+    if (!isPausedRef.current) {
+      startQueueProcessing();
+    }
   };
 
   const handleUpdateText = (id: string, newText: string) => {
@@ -260,6 +418,7 @@ export default function HomePage() {
 
   const handleClearAll = () => {
     if (window.confirm("Are you sure you want to clear all transcription history?")) {
+      handleCancelQueue();
       setSelectedIds(new Set());
       saveItemsToStorage([]);
     }
@@ -287,7 +446,7 @@ export default function HomePage() {
         <section className="text-center space-y-3 pt-4 sm:pt-6">
           <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/5 border border-white/10 text-xs font-semibold text-zinc-300 mb-1">
             <Flame className="w-3.5 h-3.5 text-tiktok-pink" />
-            <span>Fast Parallel Batch Transcriber • 1-Click Clipboard Copy</span>
+            <span>100 Turbo Parallel Transcriber • 1-Click Clipboard Copy</span>
           </div>
 
           <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-white">
@@ -299,11 +458,16 @@ export default function HomePage() {
           </p>
         </section>
 
-        {/* Input Card */}
+        {/* Input Card with Dynamic Queue Support & Pause/Resume Banner */}
         <section>
           <UrlInputSection
             onStartTranscription={handleStartTranscription}
             isLoading={isProcessing}
+            isPaused={isPaused}
+            queueCount={queueCount}
+            onPause={handlePause}
+            onResume={handleResume}
+            onCancelQueue={handleCancelQueue}
           />
         </section>
 
@@ -317,8 +481,16 @@ export default function HomePage() {
               onDeleteSelected={handleDeleteSelected}
               onDeselectAll={handleDeselectAll}
               onClearAll={handleClearAll}
+              onRetranscribeSelected={handleRetranscribeSelected}
+              onRetranscribeFailed={handleRetranscribeFailed}
               searchQuery={searchQuery}
               onSearchChange={setSearchQuery}
+              isProcessing={isProcessing}
+              isPaused={isPaused}
+              onPause={handlePause}
+              onResume={handleResume}
+              onCancelQueue={handleCancelQueue}
+              queueCount={queueCount}
             />
           </section>
         )}
@@ -380,10 +552,10 @@ export default function HomePage() {
               </div>
               <div className="p-3 rounded-xl bg-white/[0.03] border border-white/5 space-y-1">
                 <div className="text-xs font-semibold text-tiktok-pink flex items-center gap-1">
-                  <Zap className="w-3.5 h-3.5" /> Parallel Speed
+                  <Zap className="w-3.5 h-3.5" /> 100 Turbo Parallel
                 </div>
                 <p className="text-[11px] text-zinc-400">
-                  Transcribes multiple TikToks simultaneously in parallel in seconds.
+                  Transcribes up to 100 TikToks simultaneously in parallel in seconds.
                 </p>
               </div>
               <div className="p-3 rounded-xl bg-white/[0.03] border border-white/5 space-y-1">
@@ -391,7 +563,7 @@ export default function HomePage() {
                   <ShieldCheck className="w-3.5 h-3.5" /> 100% Configured
                 </div>
                 <p className="text-[11px] text-zinc-400">
-                  Pre-configured with your AI speech engine ready to use out-of-the-box.
+                  Pre-configured with AI speech engines ready to transcribe out-of-the-box.
                 </p>
               </div>
             </div>

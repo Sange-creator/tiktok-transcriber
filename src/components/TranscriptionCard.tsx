@@ -24,6 +24,7 @@ import { TranscriptionResult, ExportFormat } from "@/lib/types";
 import {
   copyToClipboard,
   downloadFile,
+  downloadAudioFile,
   formatDuration,
   generateMarkdown,
   generateSrt,
@@ -309,7 +310,7 @@ export function TranscriptionCard({
                 </button>
 
                 {showExportMenu && (
-                  <div className="absolute right-0 mt-2 w-44 rounded-xl bg-zinc-900 border border-white/15 shadow-2xl z-30 p-1.5 space-y-1 animate-in fade-in zoom-in-95">
+                  <div className="absolute right-0 mt-2 w-48 rounded-xl bg-zinc-900 border border-white/15 shadow-2xl z-30 p-1.5 space-y-1 animate-in fade-in zoom-in-95">
                     <button
                       onClick={() => handleDownload("text")}
                       className="w-full text-left px-3 py-1.5 rounded-lg text-xs text-zinc-300 hover:bg-white/10 flex items-center justify-between"
@@ -338,11 +339,35 @@ export function TranscriptionCard({
                       <span>Full JSON</span>
                       <span className="text-[10px] text-zinc-500">.json</span>
                     </button>
+                    {item.audioUrl && (
+                      <button
+                        onClick={() => {
+                          const baseName = `tiktok_audio_${item.metadata?.author || "video"}_${item.id}.mp3`;
+                          downloadAudioFile(baseName, item.audioUrl!);
+                          setShowExportMenu(false);
+                        }}
+                        className="w-full text-left px-3 py-1.5 rounded-lg text-xs text-tiktok-cyan hover:bg-white/10 flex items-center justify-between border-t border-white/5 pt-1.5 mt-0.5 font-medium"
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <Music className="w-3.5 h-3.5 text-tiktok-pink" /> Audio (.mp3)
+                        </span>
+                        <span className="text-[10px] text-tiktok-cyan/70 font-mono">MP3</span>
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
             </>
           )}
+
+          {/* Retranscribe Button */}
+          <button
+            onClick={() => onRetry(item.url)}
+            className="p-2 rounded-xl text-zinc-400 hover:text-tiktok-cyan hover:bg-white/5 transition"
+            title="Retranscribe this video"
+          >
+            <RotateCcw className="w-4 h-4" />
+          </button>
 
           {/* Delete Button */}
           <button
@@ -548,7 +573,11 @@ export function TranscriptionCard({
                   <Music className="w-3.5 h-3.5 text-tiktok-pink" />
                   <span>Audio Preview (with Speed Controls)</span>
                 </div>
-                <AudioPlayer src={item.audioUrl} duration={item.duration} />
+                <AudioPlayer
+                  src={item.audioUrl}
+                  duration={item.duration}
+                  filename={`tiktok_audio_${item.metadata?.author || "video"}_${item.id}.mp3`}
+                />
               </div>
             )}
           </>

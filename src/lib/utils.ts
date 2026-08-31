@@ -230,3 +230,62 @@ export function downloadFile(filename: string, content: string, mimeType: string
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
+
+/**
+ * Download audio file from data URI or URL
+ */
+export async function downloadAudioFile(filename: string, audioUrl: string): Promise<void> {
+  if (!audioUrl) return;
+
+  const cleanFilename = filename.endsWith(".mp3") ? filename : `${filename}.mp3`;
+
+  if (audioUrl.startsWith("data:")) {
+    try {
+      const parts = audioUrl.split(",");
+      const mime = parts[0].match(/:(.*?);/)?.[1] || "audio/mp3";
+      const byteCharacters = atob(parts[1]);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: mime });
+      const blobUrl = URL.createObjectURL(blob);
+
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = cleanFilename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
+      return;
+    } catch (e) {
+      console.warn("Base64 conversion failed, falling back to direct anchor:", e);
+    }
+  }
+
+  // Remote or local URL
+  try {
+    const res = await fetch(audioUrl);
+    if (!res.ok) throw new Error("HTTP error");
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = blobUrl;
+    link.download = cleanFilename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(blobUrl);
+  } catch (err) {
+    const link = document.createElement("a");
+    link.href = audioUrl;
+    link.download = cleanFilename;
+    link.target = "_blank";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+}
+

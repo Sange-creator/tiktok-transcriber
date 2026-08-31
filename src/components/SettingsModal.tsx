@@ -536,9 +536,9 @@ export function SettingsModal({
                 Parallel Batch Concurrency
               </label>
               <span className="text-xs font-mono font-bold text-tiktok-cyan bg-tiktok-cyan/10 px-2 py-0.5 rounded border border-tiktok-cyan/30">
-                {(localSettings.concurrency || 10) >= 100
+                {(localSettings.concurrency || 100) >= 100
                   ? "🚀 100 Turbo Parallel"
-                  : `${localSettings.concurrency || 10} at once`}
+                  : `${localSettings.concurrency || 100} at once`}
               </span>
             </div>
             <div className="grid grid-cols-5 gap-1.5 pt-1">
@@ -548,7 +548,7 @@ export function SettingsModal({
                   type="button"
                   onClick={() => setLocalSettings({ ...localSettings, concurrency: num })}
                   className={`py-2 px-1 rounded-lg text-xs font-bold border transition ${
-                    (localSettings.concurrency || 10) === num
+                    (localSettings.concurrency || 100) === num
                       ? "bg-gradient-to-r from-tiktok-pink to-tiktok-cyan text-white border-transparent shadow-lg shadow-tiktok-pink/20 scale-105"
                       : "bg-white/5 text-zinc-300 border-white/10 hover:bg-white/10 hover:text-white"
                   }`}

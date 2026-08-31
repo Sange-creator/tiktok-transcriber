@@ -4,19 +4,27 @@ import React, { useState, useEffect } from "react";
 import {
   Clipboard,
   Sparkles,
-  Play,
   Trash2,
   CheckCircle2,
   AlertCircle,
   Video,
-  ListPlus,
   ArrowRight,
+  Plus,
+  Pause,
+  Play,
+  Square,
+  Zap,
 } from "lucide-react";
 import { extractTikTokUrls } from "@/lib/utils";
 
 interface UrlInputSectionProps {
   onStartTranscription: (urls: string[]) => void;
   isLoading: boolean;
+  isPaused?: boolean;
+  queueCount?: number;
+  onPause?: () => void;
+  onResume?: () => void;
+  onCancelQueue?: () => void;
 }
 
 const SAMPLE_TIKTOK_URLS = [
@@ -27,6 +35,11 @@ const SAMPLE_TIKTOK_URLS = [
 export function UrlInputSection({
   onStartTranscription,
   isLoading,
+  isPaused = false,
+  queueCount = 0,
+  onPause,
+  onResume,
+  onCancelQueue,
 }: UrlInputSectionProps) {
   const [inputText, setInputText] = useState("");
   const [detectedUrls, setDetectedUrls] = useState<string[]>([]);
@@ -44,7 +57,6 @@ export function UrlInputSection({
 
       const extracted = extractTikTokUrls(text);
       if (extracted.length > 0) {
-        // If valid URLs found, append or replace
         setInputText((prev) => {
           if (!prev.trim()) return extracted.join("\n");
           return `${prev.trim()}\n${extracted.join("\n")}`;
@@ -52,7 +64,6 @@ export function UrlInputSection({
         setCopiedNotification(true);
         setTimeout(() => setCopiedNotification(false), 2000);
       } else {
-        // If raw text without full URL pattern, still paste into textarea
         setInputText((prev) => (prev ? `${prev}\n${text}` : text));
       }
     } catch (err) {
@@ -70,8 +81,9 @@ export function UrlInputSection({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (detectedUrls.length === 0 || isLoading) return;
+    if (detectedUrls.length === 0) return;
     onStartTranscription(detectedUrls);
+    setInputText(""); // Clear input so user is ready to add more links anytime
   };
 
   return (
@@ -79,6 +91,67 @@ export function UrlInputSection({
       {/* Decorative gradient blur */}
       <div className="absolute top-0 right-0 -mr-20 -mt-20 w-48 h-48 bg-tiktok-pink/10 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute bottom-0 left-0 -ml-20 -mb-20 w-48 h-48 bg-tiktok-cyan/10 rounded-full blur-3xl pointer-events-none" />
+
+      {/* Active Processing / Paused Control Banner */}
+      {isLoading && (
+        <div className="mb-4 p-3 rounded-xl bg-black/60 border border-tiktok-cyan/30 flex flex-wrap items-center justify-between gap-3 animate-in fade-in">
+          <div className="flex items-center gap-2.5">
+            <div className="relative flex items-center justify-center">
+              <span className={`w-3 h-3 rounded-full ${isPaused ? "bg-amber-400" : "bg-tiktok-cyan animate-ping"}`} />
+              <span className={`absolute w-2 h-2 rounded-full ${isPaused ? "bg-amber-400" : "bg-tiktok-cyan"}`} />
+            </div>
+            <div>
+              <p className="text-xs font-bold text-white flex items-center gap-1.5">
+                <Zap className="w-3.5 h-3.5 text-tiktok-cyan" />
+                {isPaused ? "Batch Transcription Paused" : "100 Turbo Parallel Processing Active"}
+              </p>
+              <p className="text-[11px] text-zinc-400">
+                {queueCount > 0
+                  ? `${queueCount} videos remaining in queue • Paste more links below to add anytime`
+                  : "Finishing active workers..."}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* Pause / Resume Button */}
+            {isPaused ? (
+              <button
+                type="button"
+                onClick={onResume}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-bold shadow-md shadow-emerald-500/20 transition active:scale-95"
+                title="Resume batch transcription"
+              >
+                <Play className="w-3.5 h-3.5 fill-current" />
+                <span>Resume</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onPause}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/90 hover:bg-amber-400 text-black text-xs font-bold shadow-md shadow-amber-500/20 transition active:scale-95"
+                title="Pause batch transcription"
+              >
+                <Pause className="w-3.5 h-3.5 fill-current" />
+                <span>Pause</span>
+              </button>
+            )}
+
+            {/* Cancel Queue Button */}
+            {onCancelQueue && (
+              <button
+                type="button"
+                onClick={onCancelQueue}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-red-900/80 hover:text-red-300 text-zinc-400 text-xs font-medium border border-white/10 transition"
+                title="Cancel remaining queue items"
+              >
+                <Square className="w-3 h-3" />
+                <span>Stop</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-4 relative z-10">
         {/* Header Toolbar */}
@@ -152,23 +225,25 @@ export function UrlInputSection({
                 <AlertCircle className="w-3.5 h-3.5" /> No valid TikTok links detected yet
               </span>
             ) : (
-              <span>Supports standard, mobile (vm/vt), and short TikTok links</span>
+              <span>Add links anytime — supports mobile (vm/vt) & 100 parallel batch</span>
             )}
           </div>
 
           <button
             type="submit"
-            disabled={detectedUrls.length === 0 || isLoading}
+            disabled={detectedUrls.length === 0}
             className={`flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-semibold text-sm text-white shadow-xl transition-all ${
-              detectedUrls.length > 0 && !isLoading
+              detectedUrls.length > 0
                 ? "bg-gradient-to-r from-tiktok-pink via-[#fe2c55] to-tiktok-cyan hover:opacity-95 hover:scale-[1.02] active:scale-95 shadow-tiktok-pink/25 cursor-pointer"
                 : "bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-60"
             }`}
           >
             {isLoading ? (
               <>
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                <span>Processing Videos...</span>
+                <Plus className="w-4 h-4 text-tiktok-cyan stroke-[2.5]" />
+                <span>
+                  Add {detectedUrls.length > 0 ? `${detectedUrls.length} ` : ""}to Queue
+                </span>
               </>
             ) : (
               <>

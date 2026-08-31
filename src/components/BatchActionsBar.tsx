@@ -11,11 +11,17 @@ import {
   CheckSquare,
   Square,
   X,
+  RotateCcw,
+  Music,
+  Pause,
+  Play,
+  AlertCircle,
 } from "lucide-react";
 import { TranscriptionResult } from "@/lib/types";
 import {
   copyToClipboard,
   downloadFile,
+  downloadAudioFile,
   formatDuration,
   generateCombinedMarkdown,
   generateCombinedPlainText,
@@ -28,8 +34,16 @@ interface BatchActionsBarProps {
   onDeleteSelected: () => void;
   onDeselectAll: () => void;
   onClearAll: () => void;
+  onRetranscribeSelected?: () => void;
+  onRetranscribeFailed?: () => void;
   searchQuery: string;
   onSearchChange: (query: string) => void;
+  isProcessing?: boolean;
+  isPaused?: boolean;
+  onPause?: () => void;
+  onResume?: () => void;
+  onCancelQueue?: () => void;
+  queueCount?: number;
 }
 
 export function BatchActionsBar({
@@ -39,13 +53,22 @@ export function BatchActionsBar({
   onDeleteSelected,
   onDeselectAll,
   onClearAll,
+  onRetranscribeSelected,
+  onRetranscribeFailed,
   searchQuery,
   onSearchChange,
+  isProcessing = false,
+  isPaused = false,
+  onPause,
+  onResume,
+  onCancelQueue,
+  queueCount = 0,
 }: BatchActionsBarProps) {
   const [copiedState, setCopiedState] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
 
   const completed = items.filter((i) => i.status === "completed");
+  const failed = items.filter((i) => i.status === "error");
   const selectedItems = items.filter((i) => selectedIds.has(i.id));
   const selectedCompleted = selectedItems.filter((i) => i.status === "completed");
 
@@ -104,6 +127,20 @@ export function BatchActionsBar({
     setShowExportMenu(false);
   };
 
+  // Download all available audio tracks from completed items
+  const handleDownloadAudios = () => {
+    const targetItems = (isSomeSelected ? selectedCompleted : completed).filter((i) => i.audioUrl);
+    if (targetItems.length === 0) return;
+
+    targetItems.forEach((item, index) => {
+      setTimeout(() => {
+        const filename = `tiktok_audio_${item.metadata?.author || "video"}_${item.id}.mp3`;
+        downloadAudioFile(filename, item.audioUrl!);
+      }, index * 250);
+    });
+    setShowExportMenu(false);
+  };
+
   return (
     <div
       className={`sticky top-20 z-30 w-full glass-panel rounded-2xl p-3 sm:p-4 shadow-2xl backdrop-blur-2xl transition-all ${
@@ -113,7 +150,7 @@ export function BatchActionsBar({
       }`}
     >
       <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
-        {/* Left Side: Select All & Stats */}
+        {/* Left Side: Select All & Stats & Live Processing Controls */}
         <div className="flex items-center gap-2.5 flex-wrap">
           {/* Select All / Deselect Toggle */}
           <button
@@ -142,6 +179,33 @@ export function BatchActionsBar({
             </span>
           </button>
 
+          {/* Live Pause / Resume Button inside sticky bar if processing */}
+          {isProcessing && (
+            <div className="flex items-center gap-1.5">
+              {isPaused ? (
+                <button
+                  type="button"
+                  onClick={onResume}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-bold shadow-md shadow-emerald-500/20 transition active:scale-95 animate-pulse"
+                  title="Resume queue"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current" />
+                  <span>Resume ({queueCount})</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onPause}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold shadow-md shadow-amber-500/20 transition active:scale-95"
+                  title="Pause queue"
+                >
+                  <Pause className="w-3.5 h-3.5 fill-current" />
+                  <span>Pause</span>
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Counts */}
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/10 text-white text-xs font-semibold">
             <Layers className="w-3.5 h-3.5 text-tiktok-cyan" />
@@ -150,17 +214,30 @@ export function BatchActionsBar({
             </span>
           </div>
 
+          {/* Failed count & retry failed button */}
+          {failed.length > 0 && onRetranscribeFailed && (
+            <button
+              type="button"
+              onClick={onRetranscribeFailed}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-red-950/70 hover:bg-red-900 border border-red-500/40 text-red-300 text-xs font-semibold transition active:scale-95"
+              title="Retranscribe all failed videos"
+            >
+              <RotateCcw className="w-3 h-3 text-red-400" />
+              <span>Retry {failed.length} Failed</span>
+            </button>
+          )}
+
           {totalWords > 0 && (
-            <span className="text-xs text-zinc-400 font-medium hidden sm:inline">
+            <span className="text-xs text-zinc-400 font-medium hidden lg:inline">
               {totalWords.toLocaleString()} words • {formatDuration(totalDuration)}
             </span>
           )}
         </div>
 
-        {/* Right Side: Search & Actions */}
+        {/* Right Side: Search & Action Buttons */}
         <div className="flex flex-wrap items-center gap-2">
           {/* Search bar */}
-          <div className="relative flex-1 sm:w-48">
+          <div className="relative flex-1 sm:w-44">
             <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
@@ -171,9 +248,22 @@ export function BatchActionsBar({
             />
           </div>
 
-          {/* If Items are Selected: Show Selected Action Buttons */}
+          {/* If Items are Selected: Show Selected Toolbar */}
           {isSomeSelected ? (
             <>
+              {/* Retranscribe Selected */}
+              {onRetranscribeSelected && (
+                <button
+                  type="button"
+                  onClick={onRetranscribeSelected}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-white bg-zinc-800 hover:bg-zinc-700 border border-white/15 shadow-md transition active:scale-95 animate-in fade-in"
+                  title={`Retranscribe ${selectedIds.size} selected videos`}
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-tiktok-cyan" />
+                  <span>Retranscribe ({selectedIds.size})</span>
+                </button>
+              )}
+
               {/* Delete Selected Button */}
               <button
                 type="button"
@@ -182,7 +272,7 @@ export function BatchActionsBar({
                 title={`Delete ${selectedIds.size} selected transcriptions`}
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>Delete Selected ({selectedIds.size})</span>
+                <span>Delete ({selectedIds.size})</span>
               </button>
 
               {/* Copy Selected Button */}
@@ -225,7 +315,7 @@ export function BatchActionsBar({
                   </button>
 
                   {showExportMenu && (
-                    <div className="absolute right-0 mt-2 w-48 rounded-xl bg-zinc-900 border border-white/15 shadow-2xl z-40 p-1.5 space-y-1 animate-in fade-in">
+                    <div className="absolute right-0 mt-2 w-52 rounded-xl bg-zinc-900 border border-white/15 shadow-2xl z-40 p-1.5 space-y-1 animate-in fade-in">
                       <button
                         onClick={() => handleDownload("plain")}
                         className="w-full text-left px-3 py-1.5 rounded-lg text-xs text-zinc-300 hover:bg-white/10 flex items-center justify-between"
@@ -243,6 +333,15 @@ export function BatchActionsBar({
                         className="w-full text-left px-3 py-1.5 rounded-lg text-xs text-zinc-300 hover:bg-white/10 flex items-center justify-between"
                       >
                         <span>JSON Data (.json)</span>
+                      </button>
+                      <button
+                        onClick={handleDownloadAudios}
+                        className="w-full text-left px-3 py-1.5 rounded-lg text-xs text-tiktok-cyan hover:bg-white/10 flex items-center justify-between border-t border-white/5 pt-1.5"
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <Music className="w-3.5 h-3.5 text-tiktok-pink" /> Download MP3s
+                        </span>
+                        <span className="text-[10px] text-zinc-500 font-mono">.mp3</span>
                       </button>
                     </div>
                   )}
@@ -300,7 +399,7 @@ export function BatchActionsBar({
                   </button>
 
                   {showExportMenu && (
-                    <div className="absolute right-0 mt-2 w-48 rounded-xl bg-zinc-900 border border-white/15 shadow-2xl z-40 p-1.5 space-y-1 animate-in fade-in">
+                    <div className="absolute right-0 mt-2 w-52 rounded-xl bg-zinc-900 border border-white/15 shadow-2xl z-40 p-1.5 space-y-1 animate-in fade-in">
                       <button
                         onClick={() => handleDownload("plain")}
                         className="w-full text-left px-3 py-1.5 rounded-lg text-xs text-zinc-300 hover:bg-white/10 flex items-center justify-between"
@@ -318,6 +417,15 @@ export function BatchActionsBar({
                         className="w-full text-left px-3 py-1.5 rounded-lg text-xs text-zinc-300 hover:bg-white/10 flex items-center justify-between"
                       >
                         <span>JSON Data (.json)</span>
+                      </button>
+                      <button
+                        onClick={handleDownloadAudios}
+                        className="w-full text-left px-3 py-1.5 rounded-lg text-xs text-tiktok-cyan hover:bg-white/10 flex items-center justify-between border-t border-white/5 pt-1.5"
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <Music className="w-3.5 h-3.5 text-tiktok-pink" /> Download MP3s
+                        </span>
+                        <span className="text-[10px] text-zinc-500 font-mono">.mp3</span>
                       </button>
                     </div>
                   )}

@@ -1,23 +1,29 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
-import { Play, Pause, Volume2, VolumeX, RotateCcw } from "lucide-react";
-import { formatDuration } from "@/lib/utils";
+import { Play, Pause, Volume2, VolumeX, RotateCcw, Download } from "lucide-react";
+import { formatDuration, downloadAudioFile } from "@/lib/utils";
 
 interface AudioPlayerProps {
   src: string;
   duration?: number;
+  filename?: string;
 }
 
 const SPEEDS = [1, 1.25, 1.5, 2];
 
-export function AudioPlayer({ src, duration: initialDuration }: AudioPlayerProps) {
+export function AudioPlayer({
+  src,
+  duration: initialDuration,
+  filename = "tiktok_audio.mp3",
+}: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(initialDuration || 0);
   const [isMuted, setIsMuted] = useState(false);
   const [speedIndex, setSpeedIndex] = useState(0);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   // Sync duration if prop updates
   useEffect(() => {
@@ -120,6 +126,16 @@ export function AudioPlayer({ src, duration: initialDuration }: AudioPlayerProps
     setSpeedIndex(nextIndex);
   };
 
+  const handleDownloadAudio = async () => {
+    if (!src || isDownloading) return;
+    setIsDownloading(true);
+    try {
+      await downloadAudioFile(filename, src);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
   if (!src) return null;
 
   return (
@@ -177,6 +193,17 @@ export function AudioPlayer({ src, duration: initialDuration }: AudioPlayerProps
         title="Cycle playback speed"
       >
         {SPEEDS[speedIndex]}x
+      </button>
+
+      {/* Download MP3 Button */}
+      <button
+        type="button"
+        onClick={handleDownloadAudio}
+        disabled={isDownloading}
+        className="p-1.5 rounded-lg text-zinc-400 hover:text-tiktok-cyan hover:bg-white/5 transition shrink-0"
+        title="Download extracted MP3 audio"
+      >
+        <Download className="w-3.5 h-3.5" />
       </button>
 
       {/* Mute */}
