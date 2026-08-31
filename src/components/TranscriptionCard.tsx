@@ -59,6 +59,7 @@ export function TranscriptionCard({
   const [editedText, setEditedText] = useState(item.text || "");
   const [aiSummary, setAiSummary] = useState<string | null>(null);
   const [isSummarizing, setIsSummarizing] = useState(false);
+  const [imgError, setImgError] = useState(false);
 
   const getExportContent = (format: ExportFormat): { content: string; filename: string; mime: string } => {
     const baseName = `transcript_${item.metadata?.author || "tiktok"}_${item.id}`.replace(
@@ -198,8 +199,8 @@ export function TranscriptionCard({
           )}
 
           {/* Thumbnail Preview */}
-          <div className="relative w-14 h-18 sm:w-16 sm:h-20 shrink-0 rounded-xl overflow-hidden bg-zinc-900 border border-white/10 flex items-center justify-center">
-            {item.metadata?.coverUrl ? (
+          <div className="relative w-14 h-18 sm:w-16 sm:h-20 shrink-0 rounded-xl overflow-hidden bg-zinc-900 border border-white/10 flex items-center justify-center shadow-md">
+            {item.metadata?.coverUrl && !imgError ? (
               <img
                 src={
                   item.metadata.coverUrl.startsWith("/")
@@ -207,12 +208,18 @@ export function TranscriptionCard({
                     : item.metadata.coverUrl
                 }
                 alt={item.metadata.title || "TikTok Cover"}
+                referrerPolicy="no-referrer"
+                crossOrigin="anonymous"
+                onError={() => setImgError(true)}
                 className="w-full h-full object-cover"
                 loading="lazy"
               />
             ) : (
-              <div className="flex flex-col items-center justify-center text-zinc-600">
-                <Music className="w-6 h-6 text-tiktok-pink/60" />
+              <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-zinc-800 to-zinc-950 p-2 text-center">
+                <Music className="w-5 h-5 text-tiktok-pink animate-pulse" />
+                <span className="text-[9px] font-bold text-zinc-400 mt-1 font-mono uppercase truncate max-w-[48px]">
+                  {item.metadata?.author?.slice(0, 4) || "TT"}
+                </span>
               </div>
             )}
           </div>

@@ -148,7 +148,11 @@ export async function extractTikTokMetadata(
               avatarUrl: item.author?.avatar?.startsWith("/")
                 ? `https://www.tikwm.com${item.author.avatar}`
                 : item.author?.avatar,
-              coverUrl: item.cover?.startsWith("/")
+              coverUrl: item.origin_cover?.startsWith("http")
+                ? item.origin_cover
+                : item.cover?.startsWith("http")
+                ? item.cover
+                : item.cover?.startsWith("/")
                 ? `https://www.tikwm.com${item.cover}`
                 : item.cover || item.origin_cover,
               duration: item.duration || 0,
@@ -267,7 +271,11 @@ export async function downloadTikTokAudio(
               avatarUrl: item.author?.avatar?.startsWith("/")
                 ? `https://www.tikwm.com${item.author.avatar}`
                 : item.author?.avatar,
-              coverUrl: item.cover?.startsWith("/")
+              coverUrl: item.origin_cover?.startsWith("http")
+                ? item.origin_cover
+                : item.cover?.startsWith("http")
+                ? item.cover
+                : item.cover?.startsWith("/")
                 ? `https://www.tikwm.com${item.cover}`
                 : item.cover || item.origin_cover,
               duration: item.duration || 0,
