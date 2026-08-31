@@ -135,7 +135,12 @@ export default function HomePage() {
     const queue = [...newItems];
     const resultsMap = new Map<string, TranscriptionResult>();
 
-    const runWorker = async () => {
+    const runWorker = async (workerIndex: number) => {
+      // Stagger worker start times slightly to prevent instantaneous traffic spikes
+      if (workerIndex > 0) {
+        await new Promise((r) => setTimeout(r, workerIndex * 150));
+      }
+
       while (queue.length > 0) {
         const targetItem = queue.shift();
         if (!targetItem) break;
@@ -146,7 +151,14 @@ export default function HomePage() {
         );
         saveItemsToStorage(currentList);
 
-        const result = await processSingleUrl(targetItem.url, targetItem.id);
+        let result = await processSingleUrl(targetItem.url, targetItem.id);
+
+        // Auto-retry once on transient network failure
+        if (result.status === "error") {
+          await new Promise((r) => setTimeout(r, 600));
+          result = await processSingleUrl(targetItem.url, targetItem.id);
+        }
+
         resultsMap.set(targetItem.id, result);
 
         currentList = currentList.map((item) =>
@@ -159,7 +171,7 @@ export default function HomePage() {
     // Run workers concurrently
     const workers = Array.from(
       { length: Math.min(concurrency, newItems.length) },
-      () => runWorker()
+      (_, idx) => runWorker(idx)
     );
 
     await Promise.all(workers);

@@ -44,55 +44,66 @@ export function normalizeTikTokUrl(rawUrl: string): string {
   }
 }
 
+const TIKWM_ENDPOINTS = [
+  "https://www.tikwm.com/api/",
+  "https://api.tikwm.com/api/",
+  "https://tikwm.com/api/",
+];
+
 /**
- * Fetch video metadata from TikTok URL using TikWM POST API or oembed/yt-dlp
+ * Fetch video metadata with retry and endpoint failover
  */
 export async function extractTikTokMetadata(url: string): Promise<VideoMetadata> {
   const cleanUrl = normalizeTikTokUrl(url);
   const id = Buffer.from(cleanUrl).toString("base64").slice(0, 16);
 
-  // Strategy 1: High-speed TikWM POST API
-  try {
-    const params = new URLSearchParams();
-    params.append("url", cleanUrl);
-    params.append("web", "1");
-    params.append("hd", "1");
+  // Strategy 1: TikWM API with multi-endpoint failover
+  for (const endpoint of TIKWM_ENDPOINTS) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const params = new URLSearchParams();
+        params.append("url", cleanUrl);
+        params.append("web", "1");
+        params.append("hd", "1");
 
-    const response = await fetch("https://www.tikwm.com/api/", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      },
-      body: params.toString(),
-      signal: AbortSignal.timeout(10000),
-    });
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "User-Agent":
+              "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          },
+          body: params.toString(),
+          signal: AbortSignal.timeout(10000),
+        });
 
-    if (response.ok) {
-      const data = await response.json();
-      if (data.code === 0 && data.data) {
-        const item = data.data;
-        return {
-          id: item.id || id,
-          url: cleanUrl,
-          title: item.title || "TikTok Video",
-          author: item.author?.unique_id || item.author?.nickname || "tiktok_user",
-          authorNickname: item.author?.nickname,
-          avatarUrl: item.author?.avatar?.startsWith("/")
-            ? `https://www.tikwm.com${item.author.avatar}`
-            : item.author?.avatar,
-          coverUrl: item.cover?.startsWith("/")
-            ? `https://www.tikwm.com${item.cover}`
-            : item.cover || item.origin_cover,
-          duration: item.duration || 0,
-          viewCount: item.play_count,
-          likeCount: item.digg_count,
-        };
+        if (response.ok) {
+          const data = await response.json();
+          if (data.code === 0 && data.data) {
+            const item = data.data;
+            return {
+              id: item.id || id,
+              url: cleanUrl,
+              title: item.title || "TikTok Video",
+              author: item.author?.unique_id || item.author?.nickname || "tiktok_user",
+              authorNickname: item.author?.nickname,
+              avatarUrl: item.author?.avatar?.startsWith("/")
+                ? `https://www.tikwm.com${item.author.avatar}`
+                : item.author?.avatar,
+              coverUrl: item.cover?.startsWith("/")
+                ? `https://www.tikwm.com${item.cover}`
+                : item.cover || item.origin_cover,
+              duration: item.duration || 0,
+              viewCount: item.play_count,
+              likeCount: item.digg_count,
+            };
+          }
+        }
+      } catch (err) {
+        // Wait briefly before retrying
+        await new Promise((r) => setTimeout(r, 400 * attempt));
       }
     }
-  } catch (err) {
-    console.warn("TikWM metadata POST fetch failed:", err);
   }
 
   // Strategy 2: Official TikTok oembed
@@ -111,30 +122,7 @@ export async function extractTikTokMetadata(url: string): Promise<VideoMetadata>
       };
     }
   } catch (err) {
-    console.warn("TikTok oembed fetch failed:", err);
-  }
-
-  // Strategy 3: yt-dlp metadata extraction
-  try {
-    const ytdlpPath = findYtDlpPath();
-    const { stdout } = await execAsync(
-      `"${ytdlpPath}" --dump-json --no-playlist --skip-download "${cleanUrl}"`,
-      { timeout: 12000, env: { ...process.env, PATH: `/opt/homebrew/bin:${process.env.PATH}` } }
-    );
-    const info = JSON.parse(stdout);
-    return {
-      id: info.id || id,
-      url: cleanUrl,
-      title: info.title || info.description || "TikTok Video",
-      author: info.uploader_id || info.uploader || "creator",
-      authorNickname: info.uploader,
-      coverUrl: info.thumbnail,
-      duration: info.duration,
-      viewCount: info.view_count,
-      likeCount: info.like_count,
-    };
-  } catch (err) {
-    console.warn("yt-dlp metadata extraction fallback:", err);
+    console.warn("TikTok oembed fetch fallback:", err);
   }
 
   // Default fallback
@@ -147,7 +135,7 @@ export async function extractTikTokMetadata(url: string): Promise<VideoMetadata>
 }
 
 /**
- * Downloads the TikTok audio directly into a fast 16kHz mono speech-optimized MP3
+ * Downloads the TikTok audio with multi-attempt retry and stream fallback
  */
 export async function downloadTikTokAudio(url: string): Promise<ExtractedAudioResult> {
   const cleanUrl = normalizeTikTokUrl(url);
@@ -157,112 +145,124 @@ export async function downloadTikTokAudio(url: string): Promise<ExtractedAudioRe
   const audioFilePath = path.join(audioDir, audioFilename);
   const ffmpegPath = findFfmpegPath();
 
-  // Strategy 1: High-Speed TikWM API with verified candidate stream downloads
-  try {
-    const params = new URLSearchParams();
-    params.append("url", cleanUrl);
-    params.append("web", "1");
-    params.append("hd", "1");
+  let lastError = "";
 
-    const response = await fetch("https://www.tikwm.com/api/", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      },
-      body: params.toString(),
-      signal: AbortSignal.timeout(12000),
-    });
+  // Strategy 1: High-Speed TikWM API with endpoint failover & 3 retries
+  for (const endpoint of TIKWM_ENDPOINTS) {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const params = new URLSearchParams();
+        params.append("url", cleanUrl);
+        params.append("web", "1");
+        params.append("hd", "1");
 
-    if (response.ok) {
-      const data = await response.json();
-      if (data.code === 0 && data.data) {
-        const item = data.data;
-        const metadata: VideoMetadata = {
-          id: item.id || `${Date.now()}`,
-          url: cleanUrl,
-          title: item.title || "TikTok Video",
-          author: item.author?.unique_id || item.author?.nickname || "tiktok_user",
-          authorNickname: item.author?.nickname,
-          avatarUrl: item.author?.avatar?.startsWith("/")
-            ? `https://www.tikwm.com${item.author.avatar}`
-            : item.author?.avatar,
-          coverUrl: item.cover?.startsWith("/")
-            ? `https://www.tikwm.com${item.cover}`
-            : item.cover || item.origin_cover,
-          duration: item.duration || 0,
-          viewCount: item.play_count,
-          likeCount: item.digg_count,
-        };
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "User-Agent":
+              "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          },
+          body: params.toString(),
+          signal: AbortSignal.timeout(12000),
+        });
 
-        // Build list of candidate stream URLs in priority order:
-        const candidates: string[] = [
-          item.music_info?.play, // 1. Direct TikTok CDN audio stream (ultra-fast, no 403s)
-          item.play?.startsWith("http") ? item.play : item.play ? `https://www.tikwm.com${item.play}` : null,
-          item.wmplay?.startsWith("http") ? item.wmplay : item.wmplay ? `https://www.tikwm.com${item.wmplay}` : null,
-          item.hdplay?.startsWith("http") ? item.hdplay : item.hdplay ? `https://www.tikwm.com${item.hdplay}` : null,
-          item.music?.startsWith("http") ? item.music : null,
-        ].filter((c): c is string => Boolean(c));
+        if (response.ok) {
+          const data = await response.json();
+          if (data.code === 0 && data.data) {
+            const item = data.data;
+            const metadata: VideoMetadata = {
+              id: item.id || `${Date.now()}`,
+              url: cleanUrl,
+              title: item.title || "TikTok Video",
+              author: item.author?.unique_id || item.author?.nickname || "tiktok_user",
+              authorNickname: item.author?.nickname,
+              avatarUrl: item.author?.avatar?.startsWith("/")
+                ? `https://www.tikwm.com${item.author.avatar}`
+                : item.author?.avatar,
+              coverUrl: item.cover?.startsWith("/")
+                ? `https://www.tikwm.com${item.cover}`
+                : item.cover || item.origin_cover,
+              duration: item.duration || 0,
+              viewCount: item.play_count,
+              likeCount: item.digg_count,
+            };
 
-        for (const streamUrl of candidates) {
-          try {
-            const streamRes = await fetch(streamUrl, {
-              headers: {
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                Referer: "https://www.tikwm.com/",
-              },
-              signal: AbortSignal.timeout(15000),
-            });
+            // Build candidate stream URLs in priority order:
+            const candidates: string[] = [
+              item.music_info?.play, // 1. Direct TikTok CDN audio stream (fastest & reliable)
+              item.play?.startsWith("http") ? item.play : item.play ? `https://www.tikwm.com${item.play}` : null,
+              item.wmplay?.startsWith("http") ? item.wmplay : item.wmplay ? `https://www.tikwm.com${item.wmplay}` : null,
+              item.hdplay?.startsWith("http") ? item.hdplay : item.hdplay ? `https://www.tikwm.com${item.hdplay}` : null,
+              item.music?.startsWith("http") ? item.music : null,
+            ].filter((c): c is string => Boolean(c));
 
-            const contentType = streamRes.headers.get("content-type") || "";
-            // Reject HTML error pages (e.g. 403 forbidden)
-            if (
-              streamRes.ok &&
-              !contentType.includes("text/html") &&
-              (contentType.includes("audio") || contentType.includes("video") || contentType.includes("octet-stream"))
-            ) {
-              const arrayBuffer = await streamRes.arrayBuffer();
-              const buffer = Buffer.from(arrayBuffer);
+            for (const streamUrl of candidates) {
+              try {
+                const streamRes = await fetch(streamUrl, {
+                  headers: {
+                    "User-Agent":
+                      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    Referer: "https://www.tiktok.com/",
+                  },
+                  signal: AbortSignal.timeout(18000),
+                });
 
-              if (buffer.length > 5000) {
-                const tempRaw = path.join(audioDir, `${fileId}_raw`);
-                fs.writeFileSync(tempRaw, buffer);
+                const contentType = streamRes.headers.get("content-type") || "";
+                if (
+                  streamRes.ok &&
+                  !contentType.includes("text/html") &&
+                  (contentType.includes("audio") ||
+                    contentType.includes("video") ||
+                    contentType.includes("octet-stream") ||
+                    contentType.includes("mp4") ||
+                    contentType.includes("mpeg"))
+                ) {
+                  const arrayBuffer = await streamRes.arrayBuffer();
+                  const buffer = Buffer.from(arrayBuffer);
 
-                // Convert to clean 16kHz mono MP3
-                try {
-                  await execAsync(
-                    `"${ffmpegPath}" -y -i "${tempRaw}" -vn -ar 16000 -ac 1 -b:a 32k -preset ultrafast "${audioFilePath}"`,
-                    { env: { ...process.env, PATH: `/opt/homebrew/bin:${process.env.PATH}` } }
-                  );
-                } catch {
-                  fs.copyFileSync(tempRaw, audioFilePath);
-                } finally {
-                  if (fs.existsSync(tempRaw)) {
+                  if (buffer.length > 5000) {
+                    const tempRaw = path.join(audioDir, `${fileId}_raw`);
+                    fs.writeFileSync(tempRaw, buffer);
+
+                    // Convert to 16kHz mono MP3
                     try {
-                      fs.unlinkSync(tempRaw);
-                    } catch {}
+                      await execAsync(
+                        `"${ffmpegPath}" -y -i "${tempRaw}" -vn -ar 16000 -ac 1 -b:a 32k -preset ultrafast "${audioFilePath}"`,
+                        { env: { ...process.env, PATH: `/opt/homebrew/bin:${process.env.PATH}` } }
+                      );
+                    } catch {
+                      fs.copyFileSync(tempRaw, audioFilePath);
+                    } finally {
+                      if (fs.existsSync(tempRaw)) {
+                        try {
+                          fs.unlinkSync(tempRaw);
+                        } catch {}
+                      }
+                    }
+
+                    if (fs.existsSync(audioFilePath) && fs.statSync(audioFilePath).size > 1000) {
+                      return {
+                        metadata,
+                        audioFilePath,
+                        audioFilename,
+                        duration: metadata.duration,
+                      };
+                    }
                   }
                 }
-
-                if (fs.existsSync(audioFilePath) && fs.statSync(audioFilePath).size > 1000) {
-                  return {
-                    metadata,
-                    audioFilePath,
-                    audioFilename,
-                    duration: metadata.duration,
-                  };
-                }
+              } catch (candidateErr: any) {
+                lastError = candidateErr.message;
               }
             }
-          } catch (candidateErr) {
-            console.warn("Candidate stream download failed, trying next:", candidateErr);
           }
         }
+      } catch (err: any) {
+        lastError = err.message;
       }
+      // Stagger retry to avoid rate limit spikes
+      await new Promise((r) => setTimeout(r, 600 * attempt));
     }
-  } catch (tikwmErr) {
-    console.warn("TikWM extraction failed, trying yt-dlp fallback:", tikwmErr);
   }
 
   // Strategy 2: yt-dlp Download & Extraction Fallback
@@ -297,11 +297,11 @@ export async function downloadTikTokAudio(url: string): Promise<ExtractedAudioRe
       };
     }
   } catch (ytdlpErr: any) {
-    console.error("yt-dlp fallback error:", ytdlpErr);
+    lastError = ytdlpErr?.message || lastError;
   }
 
   throw new Error(
-    "Could not extract audio from this TikTok URL. Please verify the URL is public and accessible."
+    `Could not extract audio from this TikTok URL. (${lastError || "Network timeout or rate limit"}). Please retry in a moment.`
   );
 }
 
