@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import fs from "fs";
 import { downloadTikTokAudio } from "@/lib/extractor";
 import { transcribeAudio } from "@/lib/transcriber";
 import { isValidTikTokUrl } from "@/lib/utils";
@@ -57,6 +58,19 @@ export async function POST(req: NextRequest) {
       ? transcription.text.trim().split(/\s+/).length
       : 0;
 
+    // Convert audio file into a data URI for 100% reliable Vercel serverless playback
+    let audioUrl = `/api/audio/${audioFilename}`;
+    try {
+      if (fs.existsSync(audioFilePath)) {
+        const audioBuffer = fs.readFileSync(audioFilePath);
+        if (audioBuffer.length > 0 && audioBuffer.length <= 4 * 1024 * 1024) {
+          audioUrl = `data:audio/mp3;base64,${audioBuffer.toString("base64")}`;
+        }
+      }
+    } catch (readErr) {
+      console.warn("Could not encode audio as data URI, using stream endpoint:", readErr);
+    }
+
     const result: TranscriptionResult = {
       id: metadata.id || `${Date.now()}`,
       url: cleanUrl,
@@ -65,7 +79,7 @@ export async function POST(req: NextRequest) {
       segments: transcription.segments,
       language: transcription.language,
       duration: duration || transcription.duration || metadata.duration,
-      audioUrl: `/api/audio/${audioFilename}`,
+      audioUrl,
       audioFilename,
       status: "completed",
       startedAt: startTime,
